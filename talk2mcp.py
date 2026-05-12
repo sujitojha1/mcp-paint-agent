@@ -46,6 +46,7 @@ def reset_state() -> None:
 # ── LLM helper ────────────────────────────────────────────────────────────────
 
 async def llm_generate(prompt: str, timeout: int = LLM_TIMEOUT) -> str:
+    await asyncio.sleep(10)
     loop = asyncio.get_event_loop()
     response = await asyncio.wait_for(
         loop.run_in_executor(
