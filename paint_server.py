@@ -24,6 +24,7 @@ import time
 from email.message import EmailMessage
 
 from dotenv import load_dotenv
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -213,9 +214,16 @@ async def send_email(subject: str, message: str) -> dict:
             creds = Credentials.from_authorized_user_file(token_path, GMAIL_SCOPES)
 
         if not creds or not creds.valid:
+            need_reauth = True
             if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
+                try:
+                    creds.refresh(Request())
+                    need_reauth = False
+                except RefreshError:
+                    # Refresh token revoked or expired — delete stale token and re-auth
+                    if os.path.exists(token_path):
+                        os.remove(token_path)
+            if need_reauth:
                 if not os.path.exists(creds_path):
                     return _text_result(
                         f"Error: credentials.json not found at '{creds_path}'. "
