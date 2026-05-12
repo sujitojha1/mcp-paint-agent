@@ -179,10 +179,6 @@ async def main() -> None:
 
                 prompt = f"{system_prompt}\n\nQuery: {current_query}"
 
-                if iteration > 0:
-                    print("Waiting 15s to avoid rate limit …")
-                    await asyncio.sleep(15)
-
                 try:
                     response_text = await llm_generate(prompt)
                 except TimeoutError:
