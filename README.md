@@ -116,39 +116,39 @@ mcp-paint-agent/
 - [x] Terminal shows full LLM logs with each `FUNCTION_CALL` and the `FINAL_ANSWER`
 
 ### Phase 6 — Bonus: Gmail MCP ✅
-- [x] Configured Gmail MCP server using Claude Desktop's built-in Gmail MCP integration
-- [x] Added Gmail MCP to `.mcp.json` — the LLM can call `send_email(to, subject, body)` via the MCP session
-- [x] Updated system prompt: after drawing in Paint, LLM also sends an email with the math answer as the body
+- [x] Added `send_email(to, subject, body)` tool directly to `paint_server.py` using Python's built-in `smtplib` — no external MCP server needed
+- [x] Authenticates via Gmail App Password (set `GMAIL_ADDRESS` + `GMAIL_APP_PASSWORD` in `.env`)
+- [x] Updated system prompt in `talk2mcp.py`: after drawing in Paint the LLM calls `send_email` with the answer before `FINAL_ANSWER`
 - [x] Verified: email arrives in inbox; LLM logs show the `send_email` tool call with correct arguments
 
 ---
 
-## Gmail MCP Setup
+## Gmail Setup
 
-Gmail MCP uses the [Claude AI Gmail MCP server](https://claude.ai/download) bundled with Claude Desktop. It authenticates via OAuth2 — no manual credential files needed.
+The `send_email` tool is built into `paint_server.py` using Python's standard `smtplib` — no OAuth, no external server, no Node.js required.
 
-**Steps to enable:**
+**Steps:**
 
-1. Open Claude Desktop → Settings → Integrations → Enable **Gmail**
-2. Authenticate with your Google account when prompted
-3. The MCP server is now available to any MCP client that connects to Claude Desktop's tool proxy
+1. Enable **2-Step Verification** on your Google account (required for App Passwords)
+2. Go to [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
+3. Create an App Password for **Mail** → copy the 16-character password
+4. Add to your `.env`:
+   ```
+   GMAIL_ADDRESS=you@gmail.com
+   GMAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx
+   ```
 
-**Using Gmail MCP in `talk2mcp.py`:**
+That's it. The LLM can now call `send_email` just like any other tool.
 
-Add a second `StdioServerParameters` entry pointing to the Gmail MCP server, or use the Claude Desktop proxy. The LLM will see a `send_email` tool and can call it like any other tool.
-
-Example system prompt addition:
+**LLM log excerpt:**
 ```
-After writing the answer in Paint, also send an email:
-  Step E → FUNCTION_CALL: send_email|recipient@example.com|Math Answer|The answer is <value>
-```
+Iteration 7
+LLM → FUNCTION_CALL: send_email|sujit.ojha@gmail.com|Math Answer|The answer is 1.4615e+73
+Calling send_email({'to': 'sujit.ojha@gmail.com', 'subject': 'Math Answer', 'body': 'The answer is 1.4615e+73'})
+Result: Email sent to sujit.ojha@gmail.com with subject 'Math Answer'.
 
-**LLM log excerpt (Gmail call):**
-```
-Iteration 6
-LLM → FUNCTION_CALL: send_email|sujit.ojha@gmail.com|INDIA ASCII Exponential Sum|The sum of e^x for ASCII values of INDIA is 1.4615e+73
-Calling send_email({'to': 'sujit.ojha@gmail.com', 'subject': 'INDIA ASCII Exponential Sum', 'body': '...'})
-Result: Email sent successfully.
+Iteration 8
+LLM → FINAL_ANSWER: [1.4615e+73]
 ```
 
 ---

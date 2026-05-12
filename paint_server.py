@@ -1,9 +1,12 @@
 """
-paint_server.py – FastMCP server exposing math tools and paint tools.
+paint_server.py – FastMCP server exposing math tools, paint tools, and Gmail.
 
 Paint tools communicate with paint_app.py via two temp files:
   /tmp/paint_window.json  – written by paint_app; tells us the canvas is ready.
   /tmp/paint_command.json – we write a command; paint_app deletes it when done.
+
+Gmail tool uses SMTP with an App Password (set GMAIL_ADDRESS and
+GMAIL_APP_PASSWORD in .env — no OAuth needed).
 
 Run with:
     python paint_server.py          # stdio transport (used by talk2mcp.py)
@@ -13,11 +16,16 @@ Run with:
 import json
 import math
 import os
+import smtplib
 import sys
 import time
+from email.mime.text import MIMEText
 
+from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
+
+load_dotenv()
 
 mcp = FastMCP("PaintServer")
 
@@ -176,6 +184,44 @@ async def add_text_in_paint(text: str) -> dict:
         return _text_result("Error: Paint did not acknowledge the add_text command.")
 
     return _text_result(f"Text written in Paint: '{text}'")
+
+
+# ── Gmail tool ────────────────────────────────────────────────────────────────
+
+@mcp.tool()
+def send_email(to: str, subject: str, body: str) -> dict:
+    """Send an email via Gmail SMTP using an App Password.
+    Requires GMAIL_ADDRESS and GMAIL_APP_PASSWORD in the environment (.env).
+    to: recipient email address.
+    subject: email subject line.
+    body: plain-text email body."""
+    sender = os.getenv("GMAIL_ADDRESS")
+    password = os.getenv("GMAIL_APP_PASSWORD")
+
+    if not sender or not password:
+        return _text_result(
+            "Error: GMAIL_ADDRESS and GMAIL_APP_PASSWORD must be set in .env. "
+            "Generate an App Password at https://myaccount.google.com/apppasswords"
+        )
+
+    msg = MIMEText(body)
+    msg["Subject"] = subject
+    msg["From"] = sender
+    msg["To"] = to
+
+    try:
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
+            server.login(sender, password)
+            server.sendmail(sender, to, msg.as_string())
+        return _text_result(f"Email sent to {to} with subject '{subject}'.")
+    except smtplib.SMTPAuthenticationError:
+        return _text_result(
+            "Error: Gmail authentication failed. "
+            "Make sure you are using an App Password, not your account password."
+        )
+    except Exception as exc:
+        return _text_result(f"Error sending email: {exc}")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
