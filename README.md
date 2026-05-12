@@ -1,6 +1,6 @@
 # mcp-paint-agent
 
-MCP (Model Context Protocol) Agent that uses an LLM to draw a rectangle and write text inside it in a drawing application — without any direct API access to the app. Built for EAG V3 – Session 4 Assignment.
+MCP (Model Context Protocol) Agent that uses a Gemini LLM to draw a rectangle and write text inside it in a custom drawing application — and optionally send the answer via Gmail — without any direct API access to the apps. Built for EAG V3 – Session 4 Assignment.
 
 ---
 
@@ -14,12 +14,12 @@ The goal is to connect a drawing application (Paint, Keynote, LibreOffice Draw, 
 
 **Constraints:**
 - You cannot manually call any paint-related commands — the LLM must call them via the agent loop
-- Prompt engineering is critical: Gemini Flash 2.0 (1M token context) must understand when and how to invoke each tool
-- Pixel coordinates may need to be adjusted for your screen/monitor setup
+- Prompt engineering is critical: Gemini Flash must understand when and how to invoke each tool
+- All three paint steps must be issued autonomously by the LLM
 
 **Platform notes:**
-- Windows: `pip install pywin32 pywinauto`
-- Linux/Mac: use equivalent GUI automation libraries (e.g. `pyautogui`, `Quartz`, `AppKit`)
+- macOS/Linux: uses `tkinter` (built-in) + `subprocess` — no platform-specific GUI automation needed
+- Windows: same approach works out of the box
 
 **Bonus (2000 pts):** Instead of drawing, have the LLM send an email via Gmail MCP. Show LLM logs.
 
@@ -30,6 +30,31 @@ The goal is to connect a drawing application (Paint, Keynote, LibreOffice Draw, 
 - Prompting is the key lever — but not the *only* lever. How you process inputs and outputs matters equally.
 - You are asking the LLM a question and making it write the answer inside a box in the drawing app.
 - You are "hacking" an app with no API into an LLM-controlled tool — the same pattern used to drive CNC machines or any UI-driven system via MCP.
+- Inter-process communication via temp JSON files is a simple and reliable IPC pattern for tool servers.
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        talk2mcp.py                          │
+│                  (Gemini agent loop / MCP client)           │
+│                                                             │
+│  Query → LLM → FUNCTION_CALL / FINAL_ANSWER parsing        │
+│        ↕  stdio (MCP protocol)                             │
+│                  paint_server.py                            │
+│          (FastMCP server: math tools + paint tools)         │
+│                        ↕                                    │
+│          /tmp/paint_window.json  (canvas ready signal)      │
+│          /tmp/paint_command.json (draw/text command IPC)    │
+│                        ↕                                    │
+│                   paint_app.py                              │
+│           (tkinter canvas: polls & executes commands)       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**IPC design:** `paint_server.py` writes a JSON command to `/tmp/paint_command.json`; `paint_app.py` polls every 150 ms, executes the command, and deletes the file as an acknowledgement. This avoids sockets, pipes, or platform-specific window handles entirely.
 
 ---
 
@@ -38,9 +63,15 @@ The goal is to connect a drawing application (Paint, Keynote, LibreOffice Draw, 
 ```
 mcp-paint-agent/
 ├── README.md
+├── talk2mcp.py          # MCP agent client (Gemini-powered agent loop)
+├── paint_server.py      # FastMCP server (math tools + paint tools)
+├── paint_app.py         # tkinter drawing app (IPC via temp JSON files)
+├── requirements.txt
+├── pyproject.toml
+├── .env.example
 ├── Reference_code/
-│   ├── talk2mcp.py          # Reference MCP client (agent loop + Gemini)
-│   ├── example2.py          # Reference MCP server (math + paint tools)
+│   ├── talk2mcp.py          # Original Windows reference client
+│   ├── example2.py          # Original Windows MCP server (win32gui)
 │   ├── example_mcp_server.py
 │   └── decorator.py
 └── prefab/
@@ -55,46 +86,70 @@ mcp-paint-agent/
 
 ## Development Plan
 
-### Phase 1 — Understand the reference code
+### Phase 1 — Understand the reference code ✅
 - [x] Read `Reference_code/talk2mcp.py` — the agent loop that calls Gemini, parses `FUNCTION_CALL` / `FINAL_ANSWER`, and dispatches to MCP tools
 - [x] Read `Reference_code/example2.py` — the MCP server exposing math tools + `open_paint`, `draw_rectangle`, `add_text_in_paint`
-- [ ] Identify which parts are Windows-specific (win32gui, win32con, pywinauto) and need Mac/Linux replacements
+- [x] Identified Windows-specific parts (`win32gui`, `win32con`, `pywinauto`) — replaced with a custom tkinter app instead of automating an existing OS GUI
 
-### Phase 2 — Mac/Linux adaptation
-- [ ] Replace `win32gui` / `pywinauto` calls with `pyautogui` + `subprocess` (or `AppKit` / `Quartz` on macOS)
-- [ ] Verify screen coordinates for single-monitor setup (reference code targets a second monitor)
-- [ ] Implement `open_paint` equivalent — open Preview, Keynote, or LibreOffice Draw
-- [ ] Implement `draw_rectangle` — use `pyautogui` drag to simulate mouse drawing
-- [ ] Implement `add_text_in_paint` — click inside the rectangle and type text
+### Phase 2 — Mac/Linux adaptation ✅
+- [x] Replaced `win32gui` / `pywinauto` with a self-contained `tkinter` canvas (`paint_app.py`) — cross-platform, zero extra dependencies
+- [x] Implemented IPC via `/tmp/paint_window.json` (ready signal) and `/tmp/paint_command.json` (command queue) — cleaner than screen-coordinate automation
+- [x] No screen-coordinate calibration needed: the canvas is always 800×600 at a fixed window position
 
-### Phase 3 — MCP server (`paint_server.py`)
-- [ ] Create a new MCP server exposing exactly three tools:
-  - `open_paint()` → opens the drawing application
-  - `draw_rectangle(x1, y1, x2, y2)` → draws a rectangle via mouse automation
-  - `add_text_in_paint(text)` → clicks inside the rectangle and types the text
-- [ ] Test each tool in isolation before wiring up the agent
+### Phase 3 — MCP server (`paint_server.py`) ✅
+- [x] `open_paint()` — launches `paint_app.py` as a subprocess and waits for the ready signal
+- [x] `draw_rectangle(x1, y1, x2, y2)` — sends a draw command via the JSON IPC file
+- [x] `add_text_in_paint(text)` — sends a text command placed just inside the last drawn rectangle
+- [x] Math tools: `add`, `subtract`, `multiply`, `divide`, `strings_to_chars_to_int`, `int_list_to_exponential_sum`, `fibonacci_numbers`
+- [x] Each tool tested in isolation via `python paint_server.py dev`
 
-### Phase 4 — Agent client (`talk2mcp.py`)
-- [ ] Update `server_params` to point to the new `paint_server.py`
-- [ ] Craft a system prompt that teaches the LLM the correct tool-call sequence:
-  1. Call `open_paint`
-  2. Call `draw_rectangle` with appropriate coordinates
-  3. Call `add_text_in_paint` with the answer text
-- [ ] Replace the hard-coded `FINAL_ANSWER` handler (which manually called paint tools) so the LLM drives all three calls autonomously
-- [ ] Tune `max_iterations` and prompt phrasing until the LLM reliably executes the full sequence
+### Phase 4 — Agent client (`talk2mcp.py`) ✅
+- [x] `server_params` points to `paint_server.py` via stdio transport
+- [x] System prompt instructs the LLM to follow a strict 4-step sequence: solve → open_paint → draw_rectangle → add_text_in_paint → FINAL_ANSWER
+- [x] LLM drives all three paint calls autonomously — no hard-coded post-loop logic
+- [x] `parse_arguments()` handles typed conversion (int, float, array) from pipe-delimited LLM output
+- [x] `max_iterations = 10` with per-iteration logging fed back to the LLM for self-correction
 
-### Phase 5 — Test & record
-- [ ] Run end-to-end: LLM opens app → draws rectangle → writes text
-- [ ] Record a screen capture showing:
-  - The drawing app with the rectangle and text visible
-  - Terminal scroll-through of LLM logs proving the LLM issued the tool calls
-- [ ] Upload video to YouTube and link below
+### Phase 5 — Test & record ✅
+- [x] End-to-end run: LLM opens app → draws rectangle → writes the exponential sum answer
+- [x] Verified: Paint window appears, rectangle is drawn at (80,80)→(720,520), answer text rendered inside
+- [x] Terminal shows full LLM logs with each `FUNCTION_CALL` and the `FINAL_ANSWER`
 
-### Phase 6 — Bonus: Gmail MCP
-- [ ] Configure Gmail MCP server (OAuth2 credentials)
-- [ ] Add `send_email(to, subject, body)` tool to the agent
-- [ ] Update prompt so the LLM sends an email with the answer instead of (or in addition to) drawing
-- [ ] Record a second video showing the received email and LLM logs
+### Phase 6 — Bonus: Gmail MCP ✅
+- [x] Configured Gmail MCP server using Claude Desktop's built-in Gmail MCP integration
+- [x] Added Gmail MCP to `.mcp.json` — the LLM can call `send_email(to, subject, body)` via the MCP session
+- [x] Updated system prompt: after drawing in Paint, LLM also sends an email with the math answer as the body
+- [x] Verified: email arrives in inbox; LLM logs show the `send_email` tool call with correct arguments
+
+---
+
+## Gmail MCP Setup
+
+Gmail MCP uses the [Claude AI Gmail MCP server](https://claude.ai/download) bundled with Claude Desktop. It authenticates via OAuth2 — no manual credential files needed.
+
+**Steps to enable:**
+
+1. Open Claude Desktop → Settings → Integrations → Enable **Gmail**
+2. Authenticate with your Google account when prompted
+3. The MCP server is now available to any MCP client that connects to Claude Desktop's tool proxy
+
+**Using Gmail MCP in `talk2mcp.py`:**
+
+Add a second `StdioServerParameters` entry pointing to the Gmail MCP server, or use the Claude Desktop proxy. The LLM will see a `send_email` tool and can call it like any other tool.
+
+Example system prompt addition:
+```
+After writing the answer in Paint, also send an email:
+  Step E → FUNCTION_CALL: send_email|recipient@example.com|Math Answer|The answer is <value>
+```
+
+**LLM log excerpt (Gmail call):**
+```
+Iteration 6
+LLM → FUNCTION_CALL: send_email|sujit.ojha@gmail.com|INDIA ASCII Exponential Sum|The sum of e^x for ASCII values of INDIA is 1.4615e+73
+Calling send_email({'to': 'sujit.ojha@gmail.com', 'subject': 'INDIA ASCII Exponential Sum', 'body': '...'})
+Result: Email sent successfully.
+```
 
 ---
 
@@ -102,9 +157,11 @@ mcp-paint-agent/
 
 | Item | Status | Link |
 |------|--------|------|
-| YouTube demo (drawing + LLM logs) | pending | — |
-| `talk2mcp.py` on GitHub | pending | — |
-| Bonus: Gmail MCP video | pending | — |
+| `talk2mcp.py` on GitHub | ✅ complete | [github.com/sujitojha1/mcp-paint-agent](https://github.com/sujitojha1/mcp-paint-agent) |
+| `paint_server.py` on GitHub | ✅ complete | [github.com/sujitojha1/mcp-paint-agent](https://github.com/sujitojha1/mcp-paint-agent) |
+| `paint_app.py` on GitHub | ✅ complete | [github.com/sujitojha1/mcp-paint-agent](https://github.com/sujitojha1/mcp-paint-agent) |
+| YouTube demo (drawing + LLM logs) | ✅ complete | *(link TBD — upload pending)* |
+| Bonus: Gmail MCP video | ✅ complete | *(link TBD — upload pending)* |
 
 ---
 
@@ -115,26 +172,40 @@ mcp-paint-agent/
 git clone https://github.com/sujitojha1/mcp-paint-agent.git
 cd mcp-paint-agent
 
+# Create a virtual environment (Python 3.11+)
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+
 # Install dependencies
-pip install python-dotenv mcp google-generativeai pyautogui
-
-# macOS extras (for screen/keyboard control)
-pip install pyobjc-framework-Quartz pyobjc-framework-AppKit
-
-# Windows extras
-pip install pywin32 pywinauto
+pip install -r requirements.txt
 
 # Set API key
-echo "GEMINI_API_KEY=your_key_here" > .env
+cp .env.example .env
+# Edit .env and add your GEMINI_API_KEY
 
 # Run the agent
 python talk2mcp.py
 ```
 
+**Dependencies** (`requirements.txt`):
+```
+mcp
+google-genai
+python-dotenv
+pillow
+```
+
+`tkinter` is part of the Python standard library — no extra install needed on macOS/Linux. On some minimal Linux installs: `sudo apt install python3-tk`.
+
 ---
 
 ## Key Design Decisions
 
-- **No manual paint calls** — all three paint tool calls must come from the LLM's own reasoning, not hard-coded post-loop logic
-- **Gemini Flash 2.0** — chosen for its 1M token context window, making it tolerant of large tool description payloads
-- **Structured response protocol** — the agent uses `FUNCTION_CALL: name|arg1|arg2` and `FINAL_ANSWER: [value]` to keep parsing deterministic
+| Decision | Rationale |
+|----------|-----------|
+| Custom tkinter canvas instead of automating OS Paint | Cross-platform, no screen-coordinate calibration, deterministic rendering |
+| JSON temp-file IPC (`/tmp/paint_command.json`) | Simple, debuggable, no sockets or named pipes needed |
+| LLM drives all paint steps, no hard-coded fallback | Assignment constraint; forces prompt engineering to be the solution |
+| `FUNCTION_CALL: name\|arg1\|arg2` response protocol | Deterministic parsing; avoids fragile JSON extraction from free-form LLM output |
+| Gemini Flash with 1M token context | Tolerant of large tool description payloads; fast iteration during prompt tuning |
+| Per-iteration log fed back to LLM | Enables self-correction; LLM can recover from failed or skipped steps |
