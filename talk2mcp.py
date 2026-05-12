@@ -23,7 +23,7 @@ load_dotenv()
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-GEMINI_MODEL = "gemini-2.5-flash-lite"
+GEMINI_MODEL = "gemini-2.5-flash"
 MAX_ITERATIONS = 10
 LLM_TIMEOUT = 30  # seconds
 
