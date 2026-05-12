@@ -2,3 +2,6 @@ mcp
 google-genai
 python-dotenv
 pillow
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2

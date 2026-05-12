@@ -5,23 +5,30 @@ Paint tools communicate with paint_app.py via two temp files:
   /tmp/paint_window.json  – written by paint_app; tells us the canvas is ready.
   /tmp/paint_command.json – we write a command; paint_app deletes it when done.
 
-Gmail tool uses SMTP with an App Password (set GMAIL_ADDRESS and
-GMAIL_APP_PASSWORD in .env — no OAuth needed).
+Gmail tool uses the Gmail API with OAuth2. Set in .env:
+  GMAIL_CREDENTIALS_PATH – path to credentials.json from Google Cloud Console
+  GMAIL_TOKEN_PATH       – path where the OAuth token will be stored (auto-created)
 
 Run with:
     python paint_server.py          # stdio transport (used by talk2mcp.py)
     python paint_server.py dev      # in-process dev server
 """
 
+import asyncio
+import base64
 import json
 import math
 import os
-import smtplib
 import sys
 import time
-from email.mime.text import MIMEText
+from email.message import EmailMessage
 
 from dotenv import load_dotenv
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
 
@@ -188,40 +195,57 @@ async def add_text_in_paint(text: str) -> dict:
 
 # ── Gmail tool ────────────────────────────────────────────────────────────────
 
+GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
+
+
 @mcp.tool()
-def send_email(to: str, subject: str, body: str) -> dict:
-    """Send an email via Gmail SMTP using an App Password.
-    Requires GMAIL_ADDRESS and GMAIL_APP_PASSWORD in the environment (.env).
-    to: recipient email address.
+async def send_email(subject: str, message: str) -> dict:
+    """Send an email to self using the Gmail API (OAuth2).
+    Requires GMAIL_CREDENTIALS_PATH and GMAIL_TOKEN_PATH in .env.
     subject: email subject line.
-    body: plain-text email body."""
-    sender = os.getenv("GMAIL_ADDRESS")
-    password = os.getenv("GMAIL_APP_PASSWORD")
-
-    if not sender or not password:
-        return _text_result(
-            "Error: GMAIL_ADDRESS and GMAIL_APP_PASSWORD must be set in .env. "
-            "Generate an App Password at https://myaccount.google.com/apppasswords"
-        )
-
-    msg = MIMEText(body)
-    msg["Subject"] = subject
-    msg["From"] = sender
-    msg["To"] = to
-
+    message: plain-text email body."""
     try:
-        with smtplib.SMTP("smtp.gmail.com", 587) as server:
-            server.starttls()
-            server.login(sender, password)
-            server.sendmail(sender, to, msg.as_string())
-        return _text_result(f"Email sent to {to} with subject '{subject}'.")
-    except smtplib.SMTPAuthenticationError:
-        return _text_result(
-            "Error: Gmail authentication failed. "
-            "Make sure you are using an App Password, not your account password."
+        creds_path = os.getenv("GMAIL_CREDENTIALS_PATH", "credentials.json")
+        token_path = os.getenv("GMAIL_TOKEN_PATH", "token.json")
+
+        creds = None
+        if os.path.exists(token_path):
+            creds = Credentials.from_authorized_user_file(token_path, GMAIL_SCOPES)
+
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                if not os.path.exists(creds_path):
+                    return _text_result(
+                        f"Error: credentials.json not found at '{creds_path}'. "
+                        "Download it from Google Cloud Console → APIs & Services → Credentials."
+                    )
+                flow = InstalledAppFlow.from_client_secrets_file(creds_path, GMAIL_SCOPES)
+                creds = flow.run_local_server(port=0)
+            with open(token_path, "w") as fh:
+                fh.write(creds.to_json())
+
+        service = build("gmail", "v1", credentials=creds)
+        profile = await asyncio.to_thread(
+            service.users().getProfile(userId="me").execute
         )
-    except Exception as exc:
-        return _text_result(f"Error sending email: {exc}")
+        user_email = profile.get("emailAddress", "me")
+
+        msg = EmailMessage()
+        msg.set_content(message)
+        msg["To"] = user_email
+        msg["From"] = user_email
+        msg["Subject"] = subject
+
+        encoded = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+        result = await asyncio.to_thread(
+            service.users().messages().send(userId="me", body={"raw": encoded}).execute
+        )
+        return _text_result(f"Email sent to {user_email} (id: {result['id']}).")
+
+    except HttpError as exc:
+        return _text_result(f"Gmail API error: {exc}")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

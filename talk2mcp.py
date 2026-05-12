@@ -86,7 +86,7 @@ of the following steps IN ORDER before outputting FINAL_ANSWER:
   Step A → FUNCTION_CALL: open_paint
   Step B → FUNCTION_CALL: draw_rectangle|80|80|720|520
   Step C → FUNCTION_CALL: add_text_in_paint|<your answer as a string>
-  Step D → FUNCTION_CALL: send_email|sujit.ojha@gmail.com|Math Answer|The answer is <your answer>
+  Step D → FUNCTION_CALL: send_email|Math Answer|The answer is <your answer>
   Step E → FINAL_ANSWER: [the numeric answer]
 
 Do NOT skip any step. Do NOT output FINAL_ANSWER before Steps C and D are done.

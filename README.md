@@ -125,27 +125,39 @@ mcp-paint-agent/
 
 ## Gmail Setup
 
-The `send_email` tool is built into `paint_server.py` using Python's standard `smtplib` — no OAuth, no external server, no Node.js required.
+The `send_email` tool uses the **Gmail API with OAuth2** — the same approach described in [Create a Gmail Agent with MCP](https://medium.com/@jason.summer/create-a-gmail-agent-with-model-context-protocol-mcp-061059c07777).
 
-**Steps:**
+**One-time Google Cloud setup:**
 
-1. Enable **2-Step Verification** on your Google account (required for App Passwords)
-2. Go to [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
-3. Create an App Password for **Mail** → copy the 16-character password
-4. Add to your `.env`:
-   ```
-   GMAIL_ADDRESS=you@gmail.com
-   GMAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx
-   ```
+1. Go to [console.cloud.google.com](https://console.cloud.google.com) → create a new project
+2. Enable **Gmail API**: APIs & Services → Enable APIs → search "Gmail API" → Enable
+3. Configure OAuth consent screen: External → add your email as a test user
+4. Add scope: `https://www.googleapis.com/auth/gmail.modify`
+5. Create credentials: APIs & Services → Credentials → **+ Create Credentials** → OAuth 2.0 Client ID → **Desktop App**
+6. Download the JSON file → save as `credentials.json` in the project root
 
-That's it. The LLM can now call `send_email` just like any other tool.
+**`.env` config:**
+```
+GMAIL_CREDENTIALS_PATH=credentials.json
+GMAIL_TOKEN_PATH=token.json
+```
+
+**First run:** a browser window will open for Google OAuth consent → approve it → `token.json` is saved automatically. Subsequent runs use the stored token.
+
+**Install dependencies:**
+```bash
+uv add google-api-python-client google-auth-oauthlib google-auth-httplib2
+# or: pip install google-api-python-client google-auth-oauthlib google-auth-httplib2
+```
+
+**Note:** `send_email` sends to your own Gmail address (the authenticated account). The LLM provides the subject and message body.
 
 **LLM log excerpt:**
 ```
 Iteration 7
-LLM → FUNCTION_CALL: send_email|sujit.ojha@gmail.com|Math Answer|The answer is 1.4615e+73
-Calling send_email({'to': 'sujit.ojha@gmail.com', 'subject': 'Math Answer', 'body': 'The answer is 1.4615e+73'})
-Result: Email sent to sujit.ojha@gmail.com with subject 'Math Answer'.
+LLM → FUNCTION_CALL: send_email|Math Answer|The answer is 1.4615e+73
+Calling send_email({'subject': 'Math Answer', 'message': 'The answer is 1.4615e+73'})
+Result: Email sent to sujit.ojha@gmail.com (id: 18f3c2a9b1d4e5f6).
 
 Iteration 8
 LLM → FINAL_ANSWER: [1.4615e+73]
