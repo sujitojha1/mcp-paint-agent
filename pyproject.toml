@@ -1,0 +1,12 @@
+[project]
+name = "mcp-paint-agent"
+version = "0.1.0"
+description = "MCP agent that uses an LLM to draw a rectangle and write text in a drawing app"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp",
+    "google-genai",
+    "python-dotenv",
+    "pillow",
+]
